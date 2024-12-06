@@ -299,8 +299,11 @@ static int ng_pkt(git_pkt **out, const char *line, size_t len)
 	pkt->ref = NULL;
 	pkt->type = GIT_PKT_NG;
 
+	if (len < 3)
+		goto out_err;
 	line += 3; /* skip "ng " */
-	if (!(ptr = strchr(line, ' ')))
+	len -= 3;
+	if (!(ptr = memchr(line, ' ', len)))
 		goto out_err;
 	len = ptr - line;
 
@@ -311,8 +314,11 @@ static int ng_pkt(git_pkt **out, const char *line, size_t len)
 	memcpy(pkt->ref, line, len);
 	pkt->ref[len] = '\0';
 
+	if (len < 1)
+		goto out_err;
 	line = ptr + 1;
-	if (!(ptr = strchr(line, '\n')))
+	len -= 1;
+	if (!(ptr = memchr(line, '\n', len)))
 		goto out_err;
 	len = ptr - line;
 
@@ -427,15 +433,23 @@ int git_pkt_parse_line(
 	if (bufflen > 0 && bufflen < (size_t)len)
 		return GIT_EBUFS;
 
+	/*
+	 * The length has to be exactly 0 in case of a flush
+	 * packet or greater than PKT_LEN_SIZE, as the decoded
+	 * length includes its own encoded length of four bytes.
+	 */
+	if (len != 0 && len < PKT_LEN_SIZE)
+		return GIT_ERROR;
+
 	line += PKT_LEN_SIZE;
 	/*
-	 * TODO: How do we deal with empty lines? Try again? with the next
-	 * line?
+	 * The Git protocol does not specify empty lines as part
+	 * of the protocol. Not knowing what to do with an empty
+	 * line, we should return an error upon hitting one.
 	 */
 	if (len == PKT_LEN_SIZE) {
-		*head = NULL;
-		*out = line;
-		return 0;
+		giterr_set_str(GITERR_NET, "Invalid empty packet");
+		return GIT_ERROR;
 	}
 
 	if (len == 0) { /* Flush pkt */
